@@ -27,7 +27,10 @@ def train(rank, a, h):
                            world_size=h.dist_config['world_size'] * h.num_gpus, rank=rank)
 
     torch.cuda.manual_seed(h.seed)
-    device = torch.device('cuda:{:d}'.format(rank))
+    if h.num_gpus == 0:
+        device = torch.device('cpu')
+    else:
+        device = torce.device(f'cuda:{rank}')
 
     generator = Generator(h).to(device)
     mpd = MultiPeriodDiscriminator().to(device)
