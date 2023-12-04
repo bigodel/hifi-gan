@@ -20,7 +20,6 @@ from utils import plot_spectrogram, scan_checkpoint, load_checkpoint, save_check
 
 torch.backends.cudnn.benchmark = True
 
-
 def train(rank, a, h):
     if h.num_gpus > 1:
         init_process_group(backend=h.dist_config['dist_backend'], init_method=h.dist_config['dist_url'],
@@ -39,7 +38,7 @@ def train(rank, a, h):
     if rank == 0:
         print(generator)
         os.makedirs(a.checkpoint_path, exist_ok=True)
-        print("checkpoints directory : ", a.checkpoint_path)
+        print(f"Checkpoints directory: {a.checkpoint_path}")
 
     if os.path.isdir(a.checkpoint_path):
         cp_g = scan_checkpoint(a.checkpoint_path, 'g_')
@@ -79,7 +78,7 @@ def train(rank, a, h):
     trainset = MelDataset(training_filelist, h.segment_size, h.n_fft, h.num_mels,
                           h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, n_cache_reuse=0,
                           shuffle=False if h.num_gpus > 1 else True, fmax_loss=h.fmax_for_loss, device=device,
-                          fine_tuning=a.fine_tuning, base_mels_path=a.input_mels_dir)
+                          base_mels_path=a.input_mels_dir)
 
     train_sampler = DistributedSampler(trainset) if h.num_gpus > 1 else None
 
@@ -92,8 +91,7 @@ def train(rank, a, h):
     if rank == 0:
         validset = MelDataset(validation_filelist, h.segment_size, h.n_fft, h.num_mels,
                               h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, False, False, n_cache_reuse=0,
-                              fmax_loss=h.fmax_for_loss, device=device, fine_tuning=a.fine_tuning,
-                              base_mels_path=a.input_mels_dir)
+                              fmax_loss=h.fmax_for_loss, device=device, base_mels_path=a.input_mels_dir)
         validation_loader = DataLoader(validset, num_workers=1, shuffle=False,
                                        sampler=None,
                                        batch_size=1,
@@ -114,6 +112,7 @@ def train(rank, a, h):
             train_sampler.set_epoch(epoch)
 
         for i, batch in enumerate(train_loader):
+            print(f'Processing batch {i}')
             if rank == 0:
                 start_b = time.time()
             x, y, _, y_mel = batch
@@ -164,7 +163,7 @@ def train(rank, a, h):
                     with torch.no_grad():
                         mel_error = F.l1_loss(y_mel, y_g_hat_mel).item()
 
-                    print('Steps : {:d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f}, s/b : {:4.3f}'.
+                    print('Steps: {:d}, Gen Loss Total: {:4.3f}, Mel-Spec. Error: {:4.3f}, s/b: {:4.3f}'.
                           format(steps, loss_gen_all, mel_error, time.time() - start_b))
 
                 # checkpointing
@@ -187,7 +186,7 @@ def train(rank, a, h):
                     sw.add_scalar("training/mel_spec_error", mel_error, steps)
 
                 # Validation
-                if steps % a.validation_interval == 0:  # and steps != 0:
+                if steps % a.validation_interval == 0 and steps != 0:
                     generator.eval()
                     torch.cuda.empty_cache()
                     val_err_tot = 0
@@ -222,10 +221,9 @@ def train(rank, a, h):
 
         scheduler_g.step()
         scheduler_d.step()
-        
+
         if rank == 0:
             print('Time taken for epoch {} is {} sec\n'.format(epoch + 1, int(time.time() - start)))
-
 
 def main():
     print('Initializing Training Process..')
@@ -233,18 +231,17 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--group_name', default=None)
-    parser.add_argument('--input_wavs_dir', default='LJSpeech-1.1/wavs')
-    parser.add_argument('--input_mels_dir', default='ft_dataset')
-    parser.add_argument('--input_training_file', default='LJSpeech-1.1/training.txt')
-    parser.add_argument('--input_validation_file', default='LJSpeech-1.1/validation.txt')
-    parser.add_argument('--checkpoint_path', default='cp_hifigan')
-    parser.add_argument('--config', default='')
-    parser.add_argument('--training_epochs', default=3100, type=int)
+    parser.add_argument('--input_wavs_dir', default='data/wavs')
+    parser.add_argument('--input_mels_dir', default='data/codes')
+    parser.add_argument('--input_training_file', default='data/train.csv')
+    parser.add_argument('--input_validation_file', default='data/test.csv')
+    parser.add_argument('--checkpoint_path', default='data/checkpoint')
+    parser.add_argument('--config', default='config.json')
+    parser.add_argument('--training_epochs', default=2, type=int)
     parser.add_argument('--stdout_interval', default=5, type=int)
     parser.add_argument('--checkpoint_interval', default=5000, type=int)
     parser.add_argument('--summary_interval', default=100, type=int)
     parser.add_argument('--validation_interval', default=1000, type=int)
-    parser.add_argument('--fine_tuning', default=False, type=bool)
 
     a = parser.parse_args()
 
@@ -268,7 +265,6 @@ def main():
         mp.spawn(train, nprocs=h.num_gpus, args=(a, h,))
     else:
         train(0, a, h)
-
 
 if __name__ == '__main__':
     main()
